@@ -17,8 +17,7 @@
     },
     "files": [
       "main.js",
-      "src/**/*",
-      "assets/**/*"
+      "src/**/*"
     ],
     "win": {
       "target": [
@@ -30,14 +29,11 @@
           "target": "portable",
           "arch": ["x64"]
         }
-      ],
-      "icon": "assets/icon.ico"
+      ]
     },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
-      "installerIcon": "assets/icon.ico",
-      "installerHeaderIcon": "assets/icon.ico",
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "MHXX護石スナイプツール"

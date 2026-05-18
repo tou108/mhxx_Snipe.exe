@@ -23,11 +23,15 @@
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         },
         {
           "target": "portable",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ]
     },
@@ -40,7 +44,13 @@
     },
     "portable": {
       "artifactName": "MHXX護石スナイプツール_portable.exe"
-    }
+    },
+    "extraResources": [
+      {
+        "from": "src/switch_bt.py",
+        "to": "src/switch_bt.py"
+      }
+    ]
   },
   "devDependencies": {
     "electron": "^31.0.0",

@@ -617,6 +617,7 @@ body.light-mode .app-header {
 <!-- MAIN TABS -->
 <div class="main-tabs">
   <div class="main-tab active" data-tab="search" onclick="switchTab('search')">🔍 護石サーチ</div>
+  <div class="main-tab" data-tab="switch" onclick="switchTab('switch')">🎮 Switch接続</div>
 </div>
 
 <!-- =================== TAB: SEARCH =================== -->
@@ -3478,5 +3479,541 @@ window.onload = function() {
   initJoyCanvas('R');
 };
 </script>
+
+
+<!-- =================== TAB: SWITCH =================== -->
+<div class="tab-page" id="tab-switch">
+<style>
+/* ── Switch タブ専用スタイル ── */
+.sw-layout { display:flex; gap:0; width:100%; min-height:calc(100vh - 90px); }
+.sw-left  { width:320px; min-width:280px; flex-shrink:0; border-right:1px solid var(--border); display:flex; flex-direction:column; overflow-y:auto; }
+.sw-center{ flex:1; display:flex; flex-direction:column; align-items:center; padding:16px; gap:12px; overflow-y:auto; }
+.sw-right { width:320px; min-width:280px; flex-shrink:0; border-left:1px solid var(--border); display:flex; flex-direction:column; overflow-y:auto; }
+
+/* 接続パネル */
+.conn-panel { padding:14px; display:flex; flex-direction:column; gap:10px; border-bottom:1px solid var(--border); }
+.conn-status { display:flex; align-items:center; gap:8px; font-size:12px; }
+.status-dot  { width:10px; height:10px; border-radius:50%; background:var(--red); transition:background 0.3s; flex-shrink:0; }
+.status-dot.connected { background:var(--green); box-shadow:0 0 6px var(--green); }
+.status-dot.connecting{ background:var(--yellow); animation:blink 0.8s infinite; }
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
+.mac-input { width:100%; font-family:monospace; letter-spacing:1px; text-transform:uppercase; }
+.conn-btn { padding:9px; border-radius:4px; cursor:pointer; font-size:12px; font-weight:700; letter-spacing:1px; border:none; transition:all 0.15s; }
+.conn-btn.connect    { background:linear-gradient(135deg,#1a5a3a,var(--teal)); color:#000; width:100%; }
+.conn-btn.connect:hover{ background:linear-gradient(135deg,var(--teal),#40ffb8); }
+.conn-btn.disconnect { background:linear-gradient(135deg,#5a1a1a,var(--red)); color:#fff; width:100%; }
+.conn-btn.disconnect:hover{ background:linear-gradient(135deg,var(--red),#ff6060); }
+
+/* コントローラー */
+.ctrl-wrapper { position:relative; width:480px; max-width:100%; aspect-ratio:480/300; user-select:none; }
+.ctrl-svg { width:100%; height:100%; }
+.ctrl-btn {
+  cursor:pointer; fill:#2a2e3a; stroke:#4a5068; stroke-width:1.5;
+  transition:fill 0.08s, stroke 0.08s;
+}
+.ctrl-btn:hover { fill:#3a3f52; stroke:#6a7090; }
+.ctrl-btn.pressed { fill:#3a7a9a; stroke:#6ab8d8; }
+.ctrl-btn-label { fill:#8898b0; font-size:10px; pointer-events:none; font-family:'Rajdhani',sans-serif; font-weight:700; }
+/* スティック */
+.joy-canvas { cursor:crosshair; border-radius:50%; background:rgba(30,35,50,0.7); border:1px solid #383b4a; }
+
+/* ログ */
+.bt-log { flex:1; overflow-y:auto; padding:10px 14px; font-family:monospace; font-size:11px; color:var(--text2); min-height:80px; max-height:180px; }
+.bt-log-line { margin-bottom:2px; }
+.bt-log-line.err { color:#ff6060; }
+.bt-log-line.ok  { color:var(--teal); }
+.bt-log-line.info{ color:var(--text2); }
+
+/* マクロ */
+.macro-list { flex:1; overflow-y:auto; padding:10px; display:flex; flex-direction:column; gap:6px; }
+.macro-item {
+  background:var(--panel2); border:1px solid var(--border2); border-radius:4px;
+  padding:8px 10px; display:flex; align-items:center; gap:8px; cursor:default;
+}
+.macro-item:hover { border-color:var(--steel); }
+.macro-item-name { flex:1; font-size:12px; color:var(--text); }
+.macro-item-run { padding:4px 10px; font-size:11px; border-radius:3px; border:none; cursor:pointer; background:var(--teal); color:#000; font-weight:700; }
+.macro-item-run:hover { background:#40ffb8; }
+.macro-item-del { padding:4px 8px; font-size:11px; border-radius:3px; border:none; cursor:pointer; background:var(--red); color:#fff; }
+.macro-run-indicator { display:none; padding:6px 14px; background:rgba(32,201,151,0.12); border-top:1px solid var(--teal); font-size:11px; color:var(--teal); align-items:center; gap:8px; }
+.macro-run-indicator.active { display:flex; }
+.macro-step-editor { padding:14px; display:flex; flex-direction:column; gap:8px; border-bottom:1px solid var(--border); }
+.step-row { display:flex; gap:6px; flex-wrap:wrap; }
+.step-btn-sel { background:var(--panel2); border:1px solid var(--border2); color:var(--text2); border-radius:3px; padding:3px 8px; font-size:11px; cursor:pointer; }
+.step-btn-sel.sel { background:var(--accent); color:#fff; border-color:var(--accent2); }
+.dur-input { width:70px; }
+</style>
+
+<div class="sw-layout">
+
+  <!-- LEFT: 接続 & ログ -->
+  <div class="sw-left">
+    <div class="sec-title"><span class="dot"></span>Switch 接続</div>
+
+    <div class="conn-panel">
+      <div class="conn-status">
+        <div class="status-dot" id="swStatusDot"></div>
+        <span id="swStatusText">未接続</span>
+      </div>
+      <label class="form-label">Switch の Bluetooth MAC アドレス</label>
+      <input class="mac-input" id="swMacInput" type="text"
+             placeholder="XX:XX:XX:XX:XX:XX" maxlength="17"
+             oninput="formatMacInput(this)">
+      <small style="color:var(--text3);font-size:10px;">
+        Switch 本体設定 → 本体 → Bluetooth → MAC アドレス で確認できます
+      </small>
+      <button class="conn-btn connect" id="swConnBtn" onclick="swConnect()">接続</button>
+      <button class="conn-btn disconnect" id="swDiscBtn" onclick="swDisconnect()" style="display:none">切断</button>
+    </div>
+
+    <div class="sec-title teal"><span class="dot"></span>BT ログ</div>
+    <div class="bt-log" id="swBtLog"></div>
+  </div>
+
+  <!-- CENTER: コントローラーUI -->
+  <div class="sw-center">
+    <div style="font-size:11px;color:var(--text3);text-align:center;">
+      ボタンをクリックして操作 / スティックはキャンバス上でドラッグ
+    </div>
+
+    <!-- Pro Controller SVG -->
+    <div class="ctrl-wrapper" id="swCtrlWrapper">
+      <svg class="ctrl-svg" viewBox="0 0 480 300" xmlns="http://www.w3.org/2000/svg">
+        <!-- 本体シルエット -->
+        <path d="M80 60 Q40 60 30 100 L20 240 Q18 280 70 280 L160 280 L160 60 Z" fill="#1a1d26" stroke="#2c2e38" stroke-width="1.5"/>
+        <path d="M400 60 Q440 60 450 100 L460 240 Q462 280 410 280 L320 280 L320 60 Z" fill="#1a1d26" stroke="#2c2e38" stroke-width="1.5"/>
+        <rect x="160" y="40" width="160" height="240" rx="8" fill="#16181d" stroke="#2c2e38" stroke-width="1.5"/>
+
+        <!-- 十字キー -->
+        <!-- UP -->
+        <rect class="ctrl-btn" id="btn-UP"    x="62" y="130" width="22" height="26" rx="3" onclick="swBtnClick('UP')" />
+        <!-- DOWN -->
+        <rect class="ctrl-btn" id="btn-DOWN"  x="62" y="164" width="22" height="26" rx="3" onclick="swBtnClick('DOWN')" />
+        <!-- LEFT -->
+        <rect class="ctrl-btn" id="btn-LEFT"  x="40" y="152" width="26" height="22" rx="3" onclick="swBtnClick('LEFT')" />
+        <!-- RIGHT -->
+        <rect class="ctrl-btn" id="btn-RIGHT" x="80" y="152" width="26" height="22" rx="3" onclick="swBtnClick('RIGHT')" />
+        <text class="ctrl-btn-label" x="73" y="146" text-anchor="middle">↑</text>
+        <text class="ctrl-btn-label" x="73" y="196" text-anchor="middle">↓</text>
+        <text class="ctrl-btn-label" x="46" y="165" text-anchor="middle">←</text>
+        <text class="ctrl-btn-label" x="100" y="165" text-anchor="middle">→</text>
+
+        <!-- A B X Y -->
+        <circle class="ctrl-btn" id="btn-A" cx="416" cy="160" r="13" onclick="swBtnClick('A')" />
+        <text class="ctrl-btn-label" x="416" y="164" text-anchor="middle">A</text>
+        <circle class="ctrl-btn" id="btn-B" cx="400" cy="178" r="13" onclick="swBtnClick('B')" />
+        <text class="ctrl-btn-label" x="400" y="182" text-anchor="middle">B</text>
+        <circle class="ctrl-btn" id="btn-X" cx="400" cy="142" r="13" onclick="swBtnClick('X')" />
+        <text class="ctrl-btn-label" x="400" y="146" text-anchor="middle">X</text>
+        <circle class="ctrl-btn" id="btn-Y" cx="384" cy="160" r="13" onclick="swBtnClick('Y')" />
+        <text class="ctrl-btn-label" x="384" y="164" text-anchor="middle">Y</text>
+
+        <!-- L / ZL -->
+        <rect class="ctrl-btn" id="btn-L"  x="26" y="56" width="64" height="18" rx="6" onclick="swBtnClick('L')" />
+        <text class="ctrl-btn-label" x="58" y="69" text-anchor="middle">L</text>
+        <rect class="ctrl-btn" id="btn-ZL" x="26" y="36" width="64" height="18" rx="6" onclick="swBtnClick('ZL')" />
+        <text class="ctrl-btn-label" x="58" y="49" text-anchor="middle">ZL</text>
+
+        <!-- R / ZR -->
+        <rect class="ctrl-btn" id="btn-R"  x="390" y="56" width="64" height="18" rx="6" onclick="swBtnClick('R')" />
+        <text class="ctrl-btn-label" x="422" y="69" text-anchor="middle">R</text>
+        <rect class="ctrl-btn" id="btn-ZR" x="390" y="36" width="64" height="18" rx="6" onclick="swBtnClick('ZR')" />
+        <text class="ctrl-btn-label" x="422" y="49" text-anchor="middle">ZR</text>
+
+        <!-- MINUS / PLUS -->
+        <circle class="ctrl-btn" id="btn-MINUS"   cx="196" cy="120" r="10" onclick="swBtnClick('MINUS')" />
+        <text class="ctrl-btn-label" x="196" y="124" text-anchor="middle" font-size="14">−</text>
+        <circle class="ctrl-btn" id="btn-PLUS"    cx="284" cy="120" r="10" onclick="swBtnClick('PLUS')" />
+        <text class="ctrl-btn-label" x="284" y="124" text-anchor="middle" font-size="14">+</text>
+
+        <!-- HOME / CAPTURE -->
+        <circle class="ctrl-btn" id="btn-HOME"    cx="270" cy="148" r="10" onclick="swBtnClick('HOME')" />
+        <text class="ctrl-btn-label" x="270" y="152" text-anchor="middle">⌂</text>
+        <circle class="ctrl-btn" id="btn-CAPTURE" cx="210" cy="148" r="10" onclick="swBtnClick('CAPTURE')" />
+        <text class="ctrl-btn-label" x="210" y="152" text-anchor="middle">□</text>
+
+        <!-- スティックキャンバス プレースホルダー -->
+        <foreignObject x="112" y="172" width="72" height="72">
+          <canvas xmlns="http://www.w3.org/1999/xhtml" id="joyL" class="joy-canvas" width="72" height="72"></canvas>
+        </foreignObject>
+        <foreignObject x="256" y="172" width="72" height="72">
+          <canvas xmlns="http://www.w3.org/1999/xhtml" id="joyR" class="joy-canvas" width="72" height="72"></canvas>
+        </foreignObject>
+        <text class="ctrl-btn-label" x="148" y="256" text-anchor="middle" font-size="9">L</text>
+        <text class="ctrl-btn-label" x="292" y="256" text-anchor="middle" font-size="9">R</text>
+
+        <!-- LEFT_STICK クリック / RIGHT_STICK クリック -->
+        <circle cx="148" cy="208" r="36" fill="none" stroke="transparent" stroke-width="5"
+          style="cursor:pointer" onclick="swBtnClick('LEFT_STICK')" />
+        <circle cx="292" cy="208" r="36" fill="none" stroke="transparent" stroke-width="5"
+          style="cursor:pointer" onclick="swBtnClick('RIGHT_STICK')" />
+      </svg>
+    </div>
+
+    <div style="font-size:10px;color:var(--text3);">
+      ※ クリックで一時押下（100ms）。長押しはマウスボタンを押したままにしてください。
+    </div>
+  </div>
+
+  <!-- RIGHT: マクロ -->
+  <div class="sw-right">
+    <div class="sec-title purple"><span class="dot"></span>マクロ</div>
+
+    <!-- ステップ追加エリア -->
+    <div class="macro-step-editor">
+      <div class="form-label">ボタン選択（複数可）</div>
+      <div class="step-row" id="macroStepBtns">
+        <!-- JS で生成 -->
+      </div>
+      <div class="form-row" style="display:flex;gap:8px;align-items:center;margin-top:4px;">
+        <label class="form-label" style="margin:0;white-space:nowrap;">継続時間</label>
+        <input class="dur-input" id="macroDur" type="number" value="200" min="16" step="50"> ms
+        <button class="search-btn" style="width:auto;padding:5px 12px;" onclick="macroAddStep()">＋ 追加</button>
+      </div>
+    </div>
+
+    <!-- 現在のステップリスト -->
+    <div class="sec-title" style="font-size:10px;"><span class="dot"></span>ステップ一覧</div>
+    <div class="macro-list" id="macroStepList"></div>
+
+    <!-- マクロ保存 / 実行 -->
+    <div style="padding:10px;display:flex;flex-direction:column;gap:6px;border-top:1px solid var(--border);">
+      <div style="display:flex;gap:6px;">
+        <input id="macroSaveName" type="text" placeholder="マクロ名" style="flex:1;font-size:12px;">
+        <button class="search-btn" style="width:auto;padding:5px 12px;" onclick="macroSave()">保存</button>
+      </div>
+      <div style="display:flex;gap:6px;">
+        <button class="search-btn purple-btn" style="flex:1;" onclick="macroRunCurrent()">▶ 現在のステップ実行</button>
+        <button class="search-btn orange-btn" style="width:auto;padding:5px 10px;" onclick="macroStopRun()">■ 停止</button>
+      </div>
+      <div style="display:flex;gap:6px;">
+        <label style="font-size:11px;color:var(--text2);white-space:nowrap;align-self:center;">繰り返し</label>
+        <input id="macroRepeat" type="number" value="1" min="1" style="width:60px;">
+        <label style="font-size:11px;color:var(--text2);white-space:nowrap;align-self:center;">回 / ループ</label>
+        <input type="checkbox" id="macroLoop" style="align-self:center;">
+      </div>
+    </div>
+
+    <!-- 保存済みマクロ -->
+    <div class="sec-title" style="font-size:10px;"><span class="dot"></span>保存済みマクロ</div>
+    <div class="macro-list" id="savedMacroList"></div>
+
+    <div class="macro-run-indicator" id="macroRunIndicator">
+      <span style="width:8px;height:8px;border-radius:50%;background:var(--teal);animation:blink 0.6s infinite;display:inline-block;"></span>
+      マクロ実行中...
+    </div>
+  </div>
+
+</div><!-- /sw-layout -->
+</div><!-- /tab-switch -->
+
+<script>
+// ============================================================
+//  Switch 接続タブ ロジック
+// ============================================================
+'use strict';
+
+// ── 状態 ──────────────────────────────────────────────────
+let swConnected   = false;
+let swConnecting  = false;
+let macroSteps    = [];     // 現在編集中のステップ
+let savedMacros   = JSON.parse(localStorage.getItem('swMacros') || '{}');
+let macroRunning  = false;
+let macroLoopFlag = false;
+let macroRepeatLeft = 0;
+
+const BUTTON_LABELS = [
+  'A','B','X','Y',
+  'UP','DOWN','LEFT','RIGHT',
+  'L','R','ZL','ZR',
+  'MINUS','PLUS','HOME','CAPTURE',
+  'LEFT_STICK','RIGHT_STICK',
+];
+
+// ── BT イベント購読 ────────────────────────────────────────
+if (window.switchBt) {
+  window.switchBt.onEvent((ev) => {
+    switch (ev.type) {
+      case 'status':
+        if (ev.status === 'connected')    setSwStatus('connected', ev.mac || '');
+        else if (ev.status === 'disconnected') setSwStatus('disconnected', '');
+        break;
+      case 'info':
+        swLog(ev.msg, 'info');
+        break;
+      case 'error':
+        swLog(ev.msg, 'err');
+        break;
+      case 'macroEnd':
+      case 'macroStopped':
+        onMacroFinished();
+        break;
+    }
+  });
+}
+
+// ── 接続 UI ───────────────────────────────────────────────
+function formatMacInput(el) {
+  let v = el.value.replace(/[^0-9a-fA-F]/g, '').toUpperCase();
+  let out = '';
+  for (let i = 0; i < Math.min(v.length, 12); i++) {
+    if (i > 0 && i % 2 === 0) out += ':';
+    out += v[i];
+  }
+  el.value = out;
+}
+
+function setSwStatus(state, mac) {
+  swConnected  = (state === 'connected');
+  swConnecting = (state === 'connecting');
+  const dot  = document.getElementById('swStatusDot');
+  const txt  = document.getElementById('swStatusText');
+  const conn = document.getElementById('swConnBtn');
+  const disc = document.getElementById('swDiscBtn');
+  dot.className = 'status-dot ' + state;
+  txt.textContent = state === 'connected'   ? `接続済み (${mac})` :
+                    state === 'connecting'  ? '接続中...' : '未接続';
+  conn.style.display = swConnected ? 'none'  : '';
+  disc.style.display = swConnected ? ''      : 'none';
+}
+
+async function swConnect() {
+  if (!window.switchBt) { swLog('switchBt API が使えません (preload未設定)', 'err'); return; }
+  const mac = document.getElementById('swMacInput').value.trim();
+  if (!/^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$/.test(mac)) {
+    swLog('正しい MAC アドレスを入力してください (例: XX:XX:XX:XX:XX:XX)', 'err'); return;
+  }
+  setSwStatus('connecting', mac);
+  swLog(`接続開始: ${mac}`, 'info');
+  await window.switchBt.connect(mac);
+}
+
+async function swDisconnect() {
+  if (window.switchBt) await window.switchBt.disconnect();
+  setSwStatus('disconnected', '');
+}
+
+// ── BT ログ ───────────────────────────────────────────────
+function swLog(msg, cls = 'info') {
+  const log = document.getElementById('swBtLog');
+  const d = document.createElement('div');
+  d.className = 'bt-log-line ' + cls;
+  d.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+  log.appendChild(d);
+  log.scrollTop = log.scrollHeight;
+  // 200行超えたら古い行を削除
+  while (log.children.length > 200) log.removeChild(log.firstChild);
+}
+
+// ── コントローラーボタン ───────────────────────────────────
+function swBtnClick(name) {
+  if (!swConnected) { swLog('接続されていません', 'err'); return; }
+  window.switchBt.button(name, true);
+  const el = document.getElementById('btn-' + name);
+  if (el) { el.classList.add('pressed'); setTimeout(() => el.classList.remove('pressed'), 120); }
+  setTimeout(() => window.switchBt.button(name, false), 100);
+}
+
+// マウス長押し対応
+document.querySelectorAll('.ctrl-btn').forEach(el => {
+  let hold = null;
+  el.addEventListener('mousedown', () => {
+    const name = el.id.replace('btn-', '');
+    if (!swConnected) return;
+    el.classList.add('pressed');
+    window.switchBt.button(name, true);
+    hold = true;
+  });
+  el.addEventListener('mouseup', () => {
+    const name = el.id.replace('btn-', '');
+    if (!hold) return;
+    hold = null;
+    el.classList.remove('pressed');
+    window.switchBt.button(name, false);
+  });
+});
+
+// ── アナログスティック ────────────────────────────────────
+(function initSticks() {
+  ['L', 'R'].forEach(side => {
+    const canvas = document.getElementById('joy' + side);
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const W = canvas.width, H = canvas.height;
+    const cx = W / 2, cy = H / 2, maxR = W * 0.32;
+    let dragging = false, knobX = cx, knobY = cy;
+
+    function draw() {
+      ctx.clearRect(0, 0, W, H);
+      ctx.beginPath(); ctx.arc(cx, cy, W*0.44, 0, Math.PI*2);
+      ctx.fillStyle = 'rgba(20,22,30,0.9)'; ctx.fill();
+      ctx.strokeStyle = '#3a3f52'; ctx.lineWidth = 1.5; ctx.stroke();
+      ctx.beginPath(); ctx.arc(knobX, knobY, W*0.18, 0, Math.PI*2);
+      ctx.fillStyle = dragging ? '#3a7a9a' : '#2a3040'; ctx.fill();
+      ctx.strokeStyle = dragging ? '#6ab8d8' : '#4a5068'; ctx.stroke();
+    }
+    draw();
+
+    function update(ex, ey) {
+      const rect = canvas.getBoundingClientRect();
+      const sx = (ex - rect.left) * (W / rect.width);
+      const sy = (ey - rect.top)  * (H / rect.height);
+      const dx = sx - cx, dy = sy - cy;
+      const dist = Math.min(Math.sqrt(dx*dx + dy*dy), maxR);
+      const angle = Math.atan2(dy, dx);
+      knobX = cx + Math.cos(angle) * dist;
+      knobY = cy + Math.sin(angle) * dist;
+      draw();
+      const nx = Math.round(2048 + (knobX - cx) / maxR * 2047);
+      const ny = Math.round(2048 - (knobY - cy) / maxR * 2047); // Y軸反転
+      if (window.switchBt && swConnected) window.switchBt.stick(side, nx, ny);
+    }
+
+    function reset() {
+      knobX = cx; knobY = cy; dragging = false; draw();
+      if (window.switchBt && swConnected) window.switchBt.stick(side, 2048, 2048);
+    }
+
+    canvas.addEventListener('mousedown', e => { dragging = true; update(e.clientX, e.clientY); });
+    window.addEventListener('mousemove', e => { if (dragging) update(e.clientX, e.clientY); });
+    window.addEventListener('mouseup',   () => { if (dragging) { dragging = false; reset(); } });
+    canvas.addEventListener('touchstart', e => { dragging = true; update(e.touches[0].clientX, e.touches[0].clientY); e.preventDefault(); }, {passive:false});
+    canvas.addEventListener('touchmove',  e => { if (dragging) update(e.touches[0].clientX, e.touches[0].clientY); e.preventDefault(); }, {passive:false});
+    canvas.addEventListener('touchend',   () => { if (dragging) { dragging = false; reset(); } });
+  });
+})();
+
+// ── マクロ UI ─────────────────────────────────────────────
+(function initMacroBtnGrid() {
+  const grid = document.getElementById('macroStepBtns');
+  if (!grid) return;
+  BUTTON_LABELS.forEach(name => {
+    const span = document.createElement('span');
+    span.className = 'step-btn-sel';
+    span.textContent = name;
+    span.dataset.name = name;
+    span.onclick = () => span.classList.toggle('sel');
+    grid.appendChild(span);
+  });
+})();
+
+function macroAddStep() {
+  const dur = parseInt(document.getElementById('macroDur').value) || 200;
+  const buttons = [...document.querySelectorAll('#macroStepBtns .step-btn-sel.sel')]
+                    .map(el => el.dataset.name);
+  if (buttons.length === 0) { showToast('ボタンを1つ以上選択してください'); return; }
+  macroSteps.push({ buttons, duration: dur });
+  // 選択解除
+  document.querySelectorAll('#macroStepBtns .step-btn-sel').forEach(el => el.classList.remove('sel'));
+  renderMacroStepList();
+}
+
+function renderMacroStepList() {
+  const list = document.getElementById('macroStepList');
+  list.innerHTML = '';
+  macroSteps.forEach((step, i) => {
+    const item = document.createElement('div');
+    item.className = 'macro-item';
+    item.innerHTML = `
+      <span class="macro-item-name">
+        ${i+1}. [${step.buttons.join('+')}] ${step.duration}ms
+      </span>
+      <button class="macro-item-del" onclick="macroRemoveStep(${i})">✕</button>
+    `;
+    list.appendChild(item);
+  });
+  if (macroSteps.length === 0) {
+    list.innerHTML = '<div style="color:var(--text3);font-size:11px;padding:8px;">ステップなし</div>';
+  }
+}
+
+function macroRemoveStep(i) {
+  macroSteps.splice(i, 1);
+  renderMacroStepList();
+}
+
+function macroSave() {
+  const name = document.getElementById('macroSaveName').value.trim();
+  if (!name) { showToast('マクロ名を入力してください'); return; }
+  if (macroSteps.length === 0) { showToast('ステップが空です'); return; }
+  savedMacros[name] = JSON.parse(JSON.stringify(macroSteps));
+  localStorage.setItem('swMacros', JSON.stringify(savedMacros));
+  renderSavedMacros();
+  showToast(`マクロ "${name}" を保存しました`);
+}
+
+function renderSavedMacros() {
+  const list = document.getElementById('savedMacroList');
+  list.innerHTML = '';
+  const keys = Object.keys(savedMacros);
+  if (keys.length === 0) {
+    list.innerHTML = '<div style="color:var(--text3);font-size:11px;padding:8px;">保存済みマクロなし</div>';
+    return;
+  }
+  keys.forEach(name => {
+    const item = document.createElement('div');
+    item.className = 'macro-item';
+    item.innerHTML = `
+      <span class="macro-item-name">${name} (${savedMacros[name].length}ステップ)</span>
+      <button class="macro-item-run" onclick="macroRunSaved('${name.replace(/'/g,"\\'")}')">▶</button>
+      <button class="macro-item-del" onclick="macroDeleteSaved('${name.replace(/'/g,"\\'")}')">✕</button>
+    `;
+    list.appendChild(item);
+  });
+}
+
+function macroDeleteSaved(name) {
+  delete savedMacros[name];
+  localStorage.setItem('swMacros', JSON.stringify(savedMacros));
+  renderSavedMacros();
+}
+
+function macroRunSteps(steps) {
+  if (!swConnected) { swLog('接続されていません', 'err'); return; }
+  if (!window.switchBt) return;
+  const repeat   = parseInt(document.getElementById('macroRepeat').value) || 1;
+  const loop     = document.getElementById('macroLoop').checked;
+  macroRunning   = true;
+  macroLoopFlag  = loop;
+  macroRepeatLeft= repeat;
+  document.getElementById('macroRunIndicator').classList.add('active');
+
+  function runOnce() {
+    window.switchBt.runMacro(steps);
+  }
+  runOnce();
+}
+
+function macroRunCurrent() { macroRunSteps(macroSteps); }
+function macroRunSaved(name) {
+  macroSteps = JSON.parse(JSON.stringify(savedMacros[name]));
+  renderMacroStepList();
+  macroRunSteps(macroSteps);
+}
+
+function macroStopRun() {
+  macroLoopFlag = false;
+  macroRepeatLeft = 0;
+  if (window.switchBt) window.switchBt.stopMacro();
+}
+
+function onMacroFinished() {
+  macroRepeatLeft--;
+  if (macroLoopFlag || macroRepeatLeft > 0) {
+    // 再実行
+    setTimeout(() => window.switchBt && window.switchBt.runMacro(macroSteps), 50);
+    return;
+  }
+  macroRunning = false;
+  document.getElementById('macroRunIndicator').classList.remove('active');
+  swLog('マクロ完了', 'ok');
+}
+
+// 初期化
+renderMacroStepList();
+renderSavedMacros();
+
+</script>
+
 </body>
 </html>
